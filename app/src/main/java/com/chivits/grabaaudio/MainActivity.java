@@ -48,6 +48,7 @@ public class MainActivity extends Activity {
 
     private static final int PEDIR_CAPTURA = 10;
     private static final int PEDIR_PERMISOS = 11;
+    private static final int PEDIR_INICIO = 12;
 
     private float d;
     private SharedPreferences sp;
@@ -60,6 +61,7 @@ public class MainActivity extends Activity {
     private LinearLayout lista;
     private int cambiosVistos = -1;
     private boolean estabaGrabando = false;
+    private boolean fondoGrabando = false, fondoPuesto = false;
 
     private MediaPlayer reproductor;
     private long sonandoId = -1;
@@ -128,14 +130,25 @@ public class MainActivity extends Activity {
         botonGrabar.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if (GrabarService.grabando) mandar(GrabarService.PARAR);
-                else empezar();
+                try {
+                    if (GrabarService.grabando) {
+                        mandar(GrabarService.PARAR);
+                    } else {
+                        Toast.makeText(MainActivity.this, "Preparando la grabación…", Toast.LENGTH_SHORT).show();
+                        empezar();
+                    }
+                } catch (Throwable e) {
+                    mostrarError("Error al empezar: " + e);
+                }
             }
         });
+        botonGrabar.setClickable(true);
+        botonGrabar.setFocusable(true);
         g.addView(botonGrabar, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(64)));
         espacio(g, 10);
         botonPausa = texto("❚❚  Pausar", 16, BLANCO);
         botonPausa.setGravity(Gravity.CENTER);
+        botonPausa.setClickable(true);
         botonPausa.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -174,7 +187,7 @@ public class MainActivity extends Activity {
                 + "Algunas apps no dejan grabar su sonido (Netflix, Spotify, llamadas): ahí saldrá en silencio. "
                 + "Puedes bajar el volumen del celular: la grabación sale igual de fuerte."));
 
-        TextView pie = texto("Hecho por CHlVOMAN · v1.0", 12, GRIS);
+        TextView pie = texto("Hecho por CHlVOMAN · v1.1", 12, GRIS);
         pie.setGravity(Gravity.CENTER);
         pie.setPadding(0, dp(18), 0, 0);
         caja.addView(pie);
@@ -184,6 +197,28 @@ public class MainActivity extends Activity {
         sv.addView(caja);
         setContentView(sv);
         marcarFormato();
+        pedirPermisosBasicos();
+    }
+
+    private void pedirPermisosBasicos() {
+        try {
+            List<String> faltan = new ArrayList<>();
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED)
+                faltan.add(Manifest.permission.RECORD_AUDIO);
+            if (Build.VERSION.SDK_INT >= 33
+                    && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                faltan.add(Manifest.permission.POST_NOTIFICATIONS);
+            if (!faltan.isEmpty()) requestPermissions(faltan.toArray(new String[0]), PEDIR_INICIO);
+        } catch (RuntimeException e) {
+            // nada
+        }
+    }
+
+    private void mostrarError(String m) {
+        aviso.setText(m);
+        aviso.setTextColor(ROJO);
+        aviso.setVisibility(View.VISIBLE);
+        Toast.makeText(this, m, Toast.LENGTH_LONG).show();
     }
 
     @Override
@@ -222,14 +257,14 @@ public class MainActivity extends Activity {
         MediaProjectionManager mpm = (MediaProjectionManager) getSystemService(Context.MEDIA_PROJECTION_SERVICE);
         try {
             startActivityForResult(mpm.createScreenCaptureIntent(), PEDIR_CAPTURA);
-        } catch (RuntimeException e) {
-            Toast.makeText(this, "Este celular no permite capturar el audio", Toast.LENGTH_LONG).show();
+        } catch (Throwable e) {
+            mostrarError("Este celular no permite capturar el audio: " + e);
         }
     }
 
     @Override
     public void onRequestPermissionsResult(int code, String[] perms, int[] res) {
-        if (code != PEDIR_PERMISOS) return;
+        if (code != PEDIR_PERMISOS) return; // al abrir la app solo se piden, sin empezar a grabar
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
             empezar();
         } else {
@@ -250,7 +285,11 @@ public class MainActivity extends Activity {
         i.putExtra("datos", data);
         i.putExtra("wav", sp.getBoolean("wav", false));
         GrabarService.mensaje = null;
-        startForegroundService(i);
+        try {
+            startForegroundService(i);
+        } catch (Throwable e) {
+            mostrarError("No se pudo iniciar el servicio: " + e);
+        }
     }
 
     private void mandar(String accion) {
@@ -284,10 +323,14 @@ public class MainActivity extends Activity {
             barraNivel.setLayoutParams(lp);
         }
 
-        fondo(botonGrabar, g ? Color.rgb(60, 64, 76) : ROJO, dp(32));
-        botonGrabar.setText(g ? "■  Parar y guardar" : "●  Grabar");
-        botonPausa.setVisibility(g ? View.VISIBLE : View.GONE);
-        fondo(botonPausa, Color.rgb(36, 40, 50), dp(24));
+        if (g != fondoGrabando || !fondoPuesto) {
+            fondoGrabando = g;
+            fondoPuesto = true;
+            fondo(botonGrabar, g ? Color.rgb(60, 64, 76) : ROJO, dp(32));
+            fondo(botonPausa, Color.rgb(36, 40, 50), dp(24));
+            botonGrabar.setText(g ? "■  Parar y guardar" : "●  Grabar");
+            botonPausa.setVisibility(g ? View.VISIBLE : View.GONE);
+        }
         botonPausa.setText(GrabarService.pausado ? "▶  Seguir" : "❚❚  Pausar");
 
         if (g && !estabaGrabando) aviso.setVisibility(View.GONE);
